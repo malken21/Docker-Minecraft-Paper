@@ -1,5 +1,7 @@
 # Docker-Minecraft-Paper
 
+最低限の PaperMC の Docker イメージ
+
 ## [updatePaper.py](/updatePaper.py)
 
 指定した PaperMC の jar ファイルが最新版ではない場合、最新版をダウンロードするスクリプト
