@@ -14,9 +14,11 @@ VERSION = argv[2]
 def getBuildObj(Name: str, Version: str):
     # 最新のビルド 取得
     with request.urlopen(f"https://api.papermc.io/v2/projects/{Name}/versions/{Version}/builds") as response:
-        data = json.load(response)
-        item = [item for item in data["builds"]
-                if item["channel"] == "default"][-1]
+        builds = [item for item in json.load(response)["builds"]
+                  if item["channel"] == "default"]
+        if (len(builds) == 0):
+            return None
+        item = builds[-1]
         BUILD = item["build"]
         FILE = item["downloads"]["application"]["name"]
         SHA256 = item["downloads"]["application"]["sha256"]
@@ -59,6 +61,8 @@ def downloadLatest(LatestObj: object, path: str):
 
 
 LatestObj = getBuildObj("paper", VERSION)
+if (LatestObj is None):
+    exit(0)
 
 # 最新版のハッシュ値
 sha256_cloud = LatestObj["sha256"]
@@ -70,6 +74,7 @@ sha256_local = getFile_sha256(PATH)
 if sha256_cloud != sha256_local:
     # ダウンロードする
     print(
-        f"Download: {LatestObj['name']}-{LatestObj['version']}-{LatestObj['build']}")
+        f"Download: {LatestObj['name']}-{LatestObj['version']}-{LatestObj['build']}"
+    )
     path = downloadLatest(LatestObj, PATH)
     print(f"Done: {path}")
