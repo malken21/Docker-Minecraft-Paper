@@ -62,7 +62,7 @@ def downloadLatest(LatestObj: object, path: str):
 
 LatestObj = getBuildObj("paper", VERSION)
 if (LatestObj is None):
-    exit(0)
+    exit(1)
 
 # 最新版のハッシュ値
 sha256_cloud = LatestObj["sha256"]
