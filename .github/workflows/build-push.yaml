@@ -18,9 +18,9 @@ jobs:
         with:
           python-version: "3.12"
           architecture: "x64"
-      - name: Build ResourcePack
+      - name: Download jarfile
         run: |
-          VERSION="1.20.4"
+          source config.ini
           python3 updatePaper.py ./docker/paper.jar $VERSION
       - name: Setup buildx
         uses: docker/setup-buildx-action@v3
