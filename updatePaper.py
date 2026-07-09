@@ -50,6 +50,15 @@ def get_latest_build(version):
         sys.stderr.write(f"Error fetching builds for {version}: {e}\n")
     return None
 
+def verify_url_exists(url):
+    req = urllib.request.Request(url, method='HEAD', headers={'User-Agent': USER_AGENT})
+    try:
+        with urllib.request.urlopen(req) as response:
+            return response.getcode() == 200
+    except Exception as e:
+        sys.stderr.write(f"HEAD request failed for {url}: {e}\n")
+        return False
+
 def get_matrix():
     url = 'https://fill.papermc.io/v3/projects/paper'
     req = urllib.request.Request(url, headers={'User-Agent': USER_AGENT})
@@ -73,7 +82,10 @@ def get_matrix():
     for v in versions:
         build_info = get_latest_build(v)
         if build_info:
-            matrix.append(build_info)
+            if verify_url_exists(build_info['url']):
+                matrix.append(build_info)
+            else:
+                sys.stderr.write(f"Skipping version {v} because download URL returns non-200 status.\n")
         time.sleep(0.5)
         
     # 最新のMinecraftバージョン（リストの最後の要素）にフラグを設定

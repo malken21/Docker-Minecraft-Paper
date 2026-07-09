@@ -10,7 +10,7 @@ on:
 
 jobs:
   list-versions:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04-arm
     outputs:
       matrix: ${{ steps.set-matrix.outputs.matrix }}
     steps:
@@ -28,7 +28,7 @@ jobs:
 
   build-and-push:
     needs: list-versions
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04-arm
     if: ${{ needs.list-versions.outputs.matrix != '' && toJson(fromJson(needs.list-versions.outputs.matrix).include) != '[]' }}
     strategy:
       matrix: ${{ fromJson(needs.list-versions.outputs.matrix) }}
