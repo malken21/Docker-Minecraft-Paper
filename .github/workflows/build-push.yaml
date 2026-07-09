@@ -91,6 +91,7 @@ jobs:
           TAGS="${TAGS},ghcr.io/${OWNER}/docker-minecraft-paper:${{ matrix.version }}-latest"
           
           if [ "${{ matrix.is_latest }}" = "true" ]; then
+            TAGS="${TAGS},ghcr.io/${OWNER}/docker-minecraft-paper:latest"
             TAGS="${TAGS},ghcr.io/${OWNER}/docker-minecraft-paper:latest-latest"
             TAGS="${TAGS},ghcr.io/${OWNER}/docker-minecraft-paper:latest-${{ matrix.build }}"
           fi
