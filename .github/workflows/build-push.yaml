@@ -78,13 +78,9 @@ jobs:
         run: |
           python updatePaper.py download ./docker/paper.jar "${{ matrix.url }}" "${{ matrix.sha256 }}"
 
-      - name: Setup QEMU
-        if: steps.check-image.outputs.exists != 'true'
-        uses: actions/setup-qemu-action@v3
-
       - name: Setup buildx
         if: steps.check-image.outputs.exists != 'true'
-        uses: actions/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v3
 
       - name: Generate tag list
         if: steps.check-image.outputs.exists != 'true'
