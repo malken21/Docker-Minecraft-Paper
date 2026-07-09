@@ -1,52 +1,112 @@
-name: Release ResourcePack
+name: Release Paper Docker Images
 on:
-  push:
-    tags:
-      - "v*.*.*-*"
+  schedule:
+    # 毎日 UTC 0:00 (日本時間 9:00) に実行
+    - cron: "0 0 * * *"
   workflow_dispatch:
+  push:
+    branches:
+      - main
+
 jobs:
-  build-and-push:
+  list-versions:
     runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.set-matrix.outputs.matrix }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      - name: Setup python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Generate matrix
+        id: set-matrix
+        run: |
+          MATRIX=$(python updatePaper.py get-matrix)
+          echo "matrix=${MATRIX}" >> $GITHUB_OUTPUT
+
+  build-and-push:
+    needs: list-versions
+    runs-on: ubuntu-latest
+    if: ${{ needs.list-versions.outputs.matrix != '' && toJson(fromJson(needs.list-versions.outputs.matrix).include) != '[]' }}
+    strategy:
+      matrix: ${{ fromJson(needs.list-versions.outputs.matrix) }}
+      fail-fast: false
+      max-parallel: 4
     permissions:
       packages: write
       contents: read
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-      - name: Setup python
-        uses: actions/setup-python@v4
-        with:
-          python-version: "3.12"
-          architecture: "x64"
-      - name: Download jarfile
+
+      - name: Convert image name to lowercase
+        id: prep
         run: |
-          source config.ini
-          python3 updatePaper.py ./docker/paper.jar $VERSION
-      - name: Setup QEMU
-        uses: docker/setup-qemu-action@v2
-      - name: Setup buildx
-        uses: docker/setup-buildx-action@v3
-      - name: Login ghcr.io
+          REPO_OWNER=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
+          echo "owner=${REPO_OWNER}" >> $GITHUB_OUTPUT
+
+      - name: Login to ghcr.io
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - name: Create metadata
-        id: meta
-        uses: docker/metadata-action@v5
+          
+      - name: Check if image already exists in ghcr.io
+        id: check-image
+        run: |
+          IMAGE_TAG="ghcr.io/${{ steps.prep.outputs.owner }}/docker-minecraft-paper:${{ matrix.tag }}"
+          echo "Checking if $IMAGE_TAG exists..."
+          if docker manifest inspect "$IMAGE_TAG" > /dev/null 2>&1; then
+            echo "exists=true" >> $GITHUB_OUTPUT
+            echo "Image $IMAGE_TAG already exists. Skipping build."
+          else
+            echo "exists=false" >> $GITHUB_OUTPUT
+            echo "Image $IMAGE_TAG does not exist. Will build."
+          fi
+
+      - name: Setup python
+        if: steps.check-image.outputs.exists != 'true'
+        uses: actions/setup-python@v5
         with:
-          images: ghcr.io/${{ github.repository }}
-          tags: |
-            type=raw,value=latest
-            type=semver,pattern={{version}}
-            type=sha,prefix=,suffix=,format=short
-      - name: Push image
-        uses: docker/build-push-action@v5
+          python-version: "3.12"
+
+      - name: Download jarfile
+        if: steps.check-image.outputs.exists != 'true'
+        run: |
+          python updatePaper.py download ./docker/paper.jar "${{ matrix.url }}" "${{ matrix.sha256 }}"
+
+      - name: Setup QEMU
+        if: steps.check-image.outputs.exists != 'true'
+        uses: actions/setup-qemu-action@v3
+
+      - name: Setup buildx
+        if: steps.check-image.outputs.exists != 'true'
+        uses: actions/setup-buildx-action@v3
+
+      - name: Generate tag list
+        if: steps.check-image.outputs.exists != 'true'
+        id: tags
+        run: |
+          OWNER="${{ steps.prep.outputs.owner }}"
+          TAGS="ghcr.io/${OWNER}/docker-minecraft-paper:${{ matrix.tag }}"
+          TAGS="${TAGS},ghcr.io/${OWNER}/docker-minecraft-paper:${{ matrix.version }}-latest"
+          
+          if [ "${{ matrix.is_latest }}" = "true" ]; then
+            TAGS="${TAGS},ghcr.io/${OWNER}/docker-minecraft-paper:latest-latest"
+            TAGS="${TAGS},ghcr.io/${OWNER}/docker-minecraft-paper:latest-${{ matrix.build }}"
+          fi
+          
+          echo "tags=${TAGS}" >> $GITHUB_OUTPUT
+
+      - name: Build and push
+        if: steps.check-image.outputs.exists != 'true'
+        uses: docker/build-push-action@v6
         with:
           file: main.dockerfile
           context: ./docker
           push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
+          tags: ${{ steps.tags.outputs.tags }}
           platforms: linux/amd64,linux/arm64

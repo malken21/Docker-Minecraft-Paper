@@ -1,80 +1,134 @@
-from urllib import request
+import sys
+import urllib.request
 import json
-from sys import argv
 import hashlib
 import os
+import time
 
+USER_AGENT = 'docker-minecraft-paper-builder/1.0 (contact: malken21)'
 
-# jarファイルパス
-PATH = argv[1]
-# バージョン
-VERSION = argv[2]
-
-
-def getBuildObj(Name: str, Version: str):
-    # 最新のビルド 取得
-    with request.urlopen(f"https://api.papermc.io/v2/projects/{Name}/versions/{Version}/builds") as response:
-        builds = [item for item in json.load(response)["builds"]
-                  if item["channel"] == "default"]
-        if (len(builds) == 0):
-            return None
-        item = builds[-1]
-        BUILD = item["build"]
-        FILE = item["downloads"]["application"]["name"]
-        SHA256 = item["downloads"]["application"]["sha256"]
-    # 最新バージョンの情報を出力
-    return {
-        "name": Name,
-        "version": Version,
-        "build": BUILD,
-        "file": FILE,
-        "sha256": SHA256
-    }
-
-
-def getFile_sha256(path: str):
-    hash = hashlib.sha256()
-    try:
-        with open(path, "rb") as f:
-            # ファイルをチャンクごとに読み込んでハッシュを計算
-            for byte_block in iter(lambda: f.read(4096), b""):
-                hash.update(byte_block)
-    except FileNotFoundError:
+def parse_version(v_str):
+    if '-' in v_str:
         return None
-    # sha256 のハッシュ値を return
-    return hash.hexdigest()
+    parts = []
+    for p in v_str.split('.'):
+        if p.isdigit():
+            parts.append(int(p))
+        else:
+            return None
+    while len(parts) < 3:
+        parts.append(0)
+    return parts
 
+def get_latest_build(version):
+    url = f'https://fill.papermc.io/v3/projects/paper/versions/{version}/builds'
+    req = urllib.request.Request(url, headers={'User-Agent': USER_AGENT})
+    try:
+        with urllib.request.urlopen(req) as response:
+            builds = json.loads(response.read().decode('utf-8'))
+            if not builds:
+                return None
+            latest = builds[-1]
+            build_num = latest['id']
+            downloads = latest.get('downloads', {})
+            server_info = downloads.get('server:default')
+            if not server_info:
+                keys = list(downloads.keys())
+                if keys:
+                    server_info = downloads[keys[0]]
+            
+            if server_info:
+                return {
+                    'version': version,
+                    'build': str(build_num),
+                    'tag': f"{version}-{build_num}",
+                    'file': server_info['name'],
+                    'sha256': server_info['checksums']['sha256'],
+                    'url': server_info['url']
+                }
+    except Exception as e:
+        sys.stderr.write(f"Error fetching builds for {version}: {e}\n")
+    return None
 
-def downloadLatest(LatestObj: object, path: str):
-    # URL
-    URL = f"https://api.papermc.io/v2/projects/{LatestObj['name']}/versions/{LatestObj['version']}/builds/{LatestObj['build']}/downloads/{LatestObj['file']}"
-    # フォルダが存在しない場合は作成
+def get_matrix():
+    url = 'https://fill.papermc.io/v3/projects/paper'
+    req = urllib.request.Request(url, headers={'User-Agent': USER_AGENT})
+    try:
+        with urllib.request.urlopen(req) as response:
+            data = json.loads(response.read().decode('utf-8'))
+    except Exception as e:
+        sys.stderr.write(f"Error fetching project data: {e}\n")
+        return {"include": []}
+
+    versions = []
+    for group, v_list in data.get('versions', {}).items():
+        for v in v_list:
+            parsed = parse_version(v)
+            if parsed and parsed >= [1, 21, 4]:
+                versions.append(v)
+    
+    versions.reverse() # 古い順
+    
+    matrix = []
+    for v in versions:
+        build_info = get_latest_build(v)
+        if build_info:
+            matrix.append(build_info)
+        time.sleep(0.5)
+        
+    # 最新のMinecraftバージョン（リストの最後の要素）にフラグを設定
+    if matrix:
+        for item in matrix:
+            item['is_latest'] = False
+        matrix[-1]['is_latest'] = True
+        
+    return {"include": matrix}
+
+def download_file(path, url, expected_sha256):
     dir_path = os.path.dirname(path)
-    if not os.path.exists(dir_path) and not os.path.isfile(path):
+    if dir_path and not os.path.exists(dir_path):
         os.makedirs(dir_path)
-    # ファイル ダウンロード
-    binary = request.urlopen(URL).read()
-    with open(path, mode="wb") as f:
-        f.write(binary)
+        
+    req = urllib.request.Request(url, headers={'User-Agent': USER_AGENT})
+    sys.stderr.write(f"Downloading {url} to {path}...\n")
+    
+    try:
+        with urllib.request.urlopen(req) as response:
+            data = response.read()
+    except Exception as e:
+        sys.stderr.write(f"Download failed: {e}\n")
+        sys.exit(1)
+        
+    # SHA256 検証
+    sha256_hash = hashlib.sha256(data).hexdigest()
+    if sha256_hash != expected_sha256:
+        sys.stderr.write(f"SHA256 mismatch! Expected {expected_sha256}, got {sha256_hash}\n")
+        sys.exit(1)
+        
+    with open(path, 'wb') as f:
+        f.write(data)
+    sys.stderr.write("Download and verification successful.\n")
 
-    return path
+def main():
+    if len(sys.argv) < 2:
+        sys.stderr.write("Usage:\n  python updatePaper.py get-matrix\n  python updatePaper.py download <path> <url> <sha256>\n")
+        sys.exit(1)
+        
+    mode = sys.argv[1]
+    if mode == 'get-matrix':
+        matrix_data = get_matrix()
+        print(json.dumps(matrix_data))
+    elif mode == 'download':
+        if len(sys.argv) < 5:
+            sys.stderr.write("Usage: python updatePaper.py download <path> <url> <sha256>\n")
+            sys.exit(1)
+        path = sys.argv[2]
+        url = sys.argv[3]
+        sha256 = sys.argv[4]
+        download_file(path, url, sha256)
+    else:
+        sys.stderr.write(f"Unknown mode: {mode}\n")
+        sys.exit(1)
 
-
-LatestObj = getBuildObj("paper", VERSION)
-if (LatestObj is None):
-    exit(1)
-
-# 最新版のハッシュ値
-sha256_cloud = LatestObj["sha256"]
-
-# ローカルのハッシュ値
-sha256_local = getFile_sha256(PATH)
-
-# 最新版とローカルのハッシュ値が違う場合
-if sha256_cloud != sha256_local:
-    # ダウンロードする
-    print(
-        f"Download: {LatestObj['name']}-{LatestObj['version']}-{LatestObj['build']}"
-    )
-    path = downloadLatest(LatestObj, PATH)
-    print(f"Done: {path}")
+if __name__ == '__main__':
+    main()

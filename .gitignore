@@ -39,3 +39,6 @@ luac.out
 *.x86_64
 *.hex
 
+# Minecraft build artifacts
+docker/
+*.jar
