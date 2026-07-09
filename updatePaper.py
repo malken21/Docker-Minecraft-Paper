@@ -4,6 +4,9 @@ import json
 import hashlib
 import os
 import time
+import zipfile
+import struct
+import re
 
 USER_AGENT = 'docker-minecraft-paper-builder/1.0 (contact: malken21)'
 
@@ -121,9 +124,106 @@ def download_file(path, url, expected_sha256):
         f.write(data)
     sys.stderr.write("Download and verification successful.\n")
 
+def get_jar_java_version(jar_path):
+    if not os.path.exists(jar_path):
+        sys.stderr.write(f"Jar file not found: {jar_path}\n")
+        return None
+    
+    try:
+        with zipfile.ZipFile(jar_path, 'r') as z:
+            # 優先してチェックする既知のエントリーポイントクラス
+            priority_classes = [
+                'net/minecraft/bundler/Main.class',
+                'org/bukkit/craftbukkit/Main.class',
+                'Main.class'
+            ]
+            for p_class in priority_classes:
+                if p_class in z.namelist():
+                    try:
+                        with z.open(p_class) as f:
+                            magic = f.read(4)
+                            if magic == b'\xca\xfe\xba\xbe':
+                                _, major = struct.unpack('>HH', f.read(4))
+                                if major >= 45:
+                                    return major - 44
+                    except Exception:
+                        pass
+
+            # 見つからなかった場合は、最初に見つかったクラスファイルを使用する
+            for name in z.namelist():
+                if name.endswith('.class'):
+                    try:
+                        with z.open(name) as f:
+                            magic = f.read(4)
+                            if magic == b'\xca\xfe\xba\xbe':
+                                _, major = struct.unpack('>HH', f.read(4))
+                                if major >= 45:
+                                    return major - 44
+                    except Exception:
+                        continue
+    except Exception as e:
+        sys.stderr.write(f"Error reading jar {jar_path}: {e}\n")
+    return None
+
+def get_dockerfile_java_version(dockerfile_path):
+    if not os.path.exists(dockerfile_path):
+        sys.stderr.write(f"Dockerfile not found: {dockerfile_path}\n")
+        return None
+    try:
+        args = {}
+        last_from_line = None
+        with open(dockerfile_path, 'r', encoding='utf-8') as f:
+            for line in f:
+                stripped = line.strip()
+                if stripped.startswith('#'):
+                    continue
+                if stripped.startswith('ARG'):
+                    parts = stripped.split()
+                    if len(parts) >= 2:
+                        arg_parts = parts[1].split('=', 1)
+                        if len(arg_parts) == 2:
+                            args[arg_parts[0]] = arg_parts[1]
+                if stripped.startswith('FROM'):
+                    last_from_line = stripped
+                    
+        if last_from_line:
+            parts = last_from_line.split()
+            if len(parts) >= 2:
+                image = parts[1]
+                for arg_name, arg_val in args.items():
+                    image = image.replace(f"${{{arg_name}}}", arg_val)
+                    image = image.replace(f"${arg_name}", arg_val)
+                match = re.search(r'java(\d+)|openjdk:(\d+)|temurin:(\d+)|jdk-(\d+)|jre-(\d+)', image, re.IGNORECASE)
+                if match:
+                    for val in match.groups():
+                        if val:
+                            return int(val)
+    except Exception as e:
+        sys.stderr.write(f"Error reading Dockerfile {dockerfile_path}: {e}\n")
+    return None
+
+def verify_java_versions(jar_path, dockerfile_path):
+    jar_ver = get_jar_java_version(jar_path)
+    docker_ver = get_dockerfile_java_version(dockerfile_path)
+    
+    if jar_ver is None:
+        sys.stderr.write(f"Could not determine Java version from jar file {jar_path}.\n")
+        sys.exit(1)
+    if docker_ver is None:
+        sys.stderr.write(f"Could not determine Java version from Dockerfile {dockerfile_path}.\n")
+        sys.exit(1)
+        
+    sys.stderr.write(f"Jar requires Java {jar_ver}. Dockerfile provides Java {docker_ver}.\n")
+    
+    if docker_ver < jar_ver:
+        sys.stderr.write(f"Error: Dockerfile Java version ({docker_ver}) is lower than Jar required Java version ({jar_ver})!\n")
+        sys.exit(1)
+    
+    sys.stderr.write("Java version verification passed.\n")
+
 def main():
     if len(sys.argv) < 2:
-        sys.stderr.write("Usage:\n  python updatePaper.py get-matrix\n  python updatePaper.py download <path> <url> <sha256>\n")
+        sys.stderr.write("Usage:\n  python updatePaper.py get-matrix\n  python updatePaper.py download <path> <url> <sha256>\n  python updatePaper.py verify-java <jar_path> <dockerfile_path>\n  python updatePaper.py get-jar-version <jar_path>\n")
         sys.exit(1)
         
     mode = sys.argv[1]
@@ -138,6 +238,23 @@ def main():
         url = sys.argv[3]
         sha256 = sys.argv[4]
         download_file(path, url, sha256)
+    elif mode == 'verify-java':
+        if len(sys.argv) < 4:
+            sys.stderr.write("Usage: python updatePaper.py verify-java <jar_path> <dockerfile_path>\n")
+            sys.exit(1)
+        jar_path = sys.argv[2]
+        dockerfile_path = sys.argv[3]
+        verify_java_versions(jar_path, dockerfile_path)
+    elif mode == 'get-jar-version':
+        if len(sys.argv) < 3:
+            sys.stderr.write("Usage: python updatePaper.py get-jar-version <jar_path>\n")
+            sys.exit(1)
+        jar_path = sys.argv[2]
+        jar_ver = get_jar_java_version(jar_path)
+        if jar_ver is None:
+            sys.stderr.write(f"Could not determine Java version from jar file {jar_path}.\n")
+            sys.exit(1)
+        print(jar_ver)
     else:
         sys.stderr.write(f"Unknown mode: {mode}\n")
         sys.exit(1)

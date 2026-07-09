@@ -1,4 +1,5 @@
-FROM gcr.io/distroless/java21-debian12
+ARG JAVA_VERSION
+FROM gcr.io/distroless/java${JAVA_VERSION}-debian12
 
 COPY paper.jar app.jar
 
