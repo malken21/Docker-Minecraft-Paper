@@ -73,7 +73,7 @@ def get_matrix():
     for group, v_list in data.get('versions', {}).items():
         for v in v_list:
             parsed = parse_version(v)
-            if parsed and parsed >= [1, 21, 4]:
+            if parsed and parsed[0] == 1 and parsed >= [1, 21, 4]:
                 versions.append(v)
     
     versions.reverse() # 古い順
