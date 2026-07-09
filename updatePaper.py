@@ -28,7 +28,7 @@ def get_latest_build(version):
             builds = json.loads(response.read().decode('utf-8'))
             if not builds:
                 return None
-            latest = builds[-1]
+            latest = builds[0]
             build_num = latest['id']
             downloads = latest.get('downloads', {})
             server_info = downloads.get('server:default')
