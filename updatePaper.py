@@ -135,12 +135,34 @@ def get_jar_java_version(jar_path):
     
     try:
         with zipfile.ZipFile(jar_path, 'r') as z:
+            if 'version.json' in z.namelist():
+                try:
+                    version_data = json.loads(z.read('version.json').decode('utf-8'))
+                    if 'java_version' in version_data:
+                        return int(version_data['java_version'])
+                except Exception:
+                    pass
+
             # 優先してチェックする既知のエントリーポイントクラス
             priority_classes = [
                 'net/minecraft/bundler/Main.class',
                 'org/bukkit/craftbukkit/Main.class',
-                'Main.class'
+                'Main.class',
+                'io/papermc/paperclip/Main.class',
+                'io/papermc/paperclip/Paperclip.class'
             ]
+            
+            # マニフェストからMain-Classを取得して最優先にする
+            if 'META-INF/MANIFEST.MF' in z.namelist():
+                try:
+                    mf = z.read('META-INF/MANIFEST.MF').decode('utf-8')
+                    for line in mf.splitlines():
+                        if line.startswith('Main-Class:'):
+                            main_class = line.split(':', 1)[1].strip().replace('.', '/') + '.class'
+                            if main_class not in priority_classes:
+                                priority_classes.insert(0, main_class)
+                except Exception:
+                    pass
             for p_class in priority_classes:
                 if p_class in z.namelist():
                     try:

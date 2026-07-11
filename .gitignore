@@ -42,3 +42,6 @@ luac.out
 # Minecraft build artifacts
 docker/
 *.jar
+
+# Python
+__pycache__/
