@@ -23,35 +23,38 @@ def parse_version(v_str):
         parts.append(0)
     return parts
 
-def get_latest_build(version):
+def get_recent_builds(version, limit=10):
     url = f'https://fill.papermc.io/v3/projects/paper/versions/{version}/builds'
     req = urllib.request.Request(url, headers={'User-Agent': USER_AGENT})
     try:
         with urllib.request.urlopen(req) as response:
             builds = json.loads(response.read().decode('utf-8'))
             if not builds:
-                return None
-            latest = builds[0]
-            build_num = latest['id']
-            downloads = latest.get('downloads', {})
-            server_info = downloads.get('server:default')
-            if not server_info:
-                keys = list(downloads.keys())
-                if keys:
-                    server_info = downloads[keys[0]]
+                return []
             
-            if server_info:
-                return {
-                    'version': version,
-                    'build': str(build_num),
-                    'tag': f"{version}-{build_num}",
-                    'file': server_info['name'],
-                    'sha256': server_info['checksums']['sha256'],
-                    'url': server_info['url']
-                }
+            recent_builds = []
+            for b in builds[:limit]:
+                build_num = b['id']
+                downloads = b.get('downloads', {})
+                server_info = downloads.get('server:default')
+                if not server_info:
+                    keys = list(downloads.keys())
+                    if keys:
+                        server_info = downloads[keys[0]]
+                
+                if server_info:
+                    recent_builds.append({
+                        'version': version,
+                        'build': str(build_num),
+                        'tag': f"{version}-{build_num}",
+                        'file': server_info['name'],
+                        'sha256': server_info['checksums']['sha256'],
+                        'url': server_info['url']
+                    })
+            return recent_builds
     except Exception as e:
         sys.stderr.write(f"Error fetching builds for {version}: {e}\n")
-    return None
+    return []
 
 def verify_url_exists(url):
     req = urllib.request.Request(url, method='HEAD', headers={'User-Agent': USER_AGENT})
@@ -83,12 +86,13 @@ def get_matrix():
     
     matrix = []
     for v in versions:
-        build_info = get_latest_build(v)
-        if build_info:
+        builds_info = get_recent_builds(v, limit=10)
+        builds_info.reverse() # 古いビルドから順に追加
+        for build_info in builds_info:
             if verify_url_exists(build_info['url']):
                 matrix.append(build_info)
             else:
-                sys.stderr.write(f"Skipping version {v} because download URL returns non-200 status.\n")
+                sys.stderr.write(f"Skipping version {v} build {build_info['build']} because download URL returns non-200 status.\n")
         time.sleep(0.5)
         
     # 最新のMinecraftバージョン（リストの最後の要素）にフラグを設定
