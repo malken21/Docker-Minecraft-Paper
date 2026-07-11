@@ -57,49 +57,30 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-          
-      - name: Check if image already exists in ghcr.io
-        id: check-image
-        run: |
-          IMAGE_TAG="ghcr.io/${{ steps.prep.outputs.owner }}/docker-minecraft-paper:${{ matrix.tag }}"
-          echo "Checking if $IMAGE_TAG exists..."
-          if docker manifest inspect "$IMAGE_TAG" > /dev/null 2>&1; then
-            echo "exists=true" >> $GITHUB_OUTPUT
-            echo "Image $IMAGE_TAG already exists. Skipping build."
-          else
-            echo "exists=false" >> $GITHUB_OUTPUT
-            echo "Image $IMAGE_TAG does not exist. Will build."
-          fi
 
       - name: Setup python
-        if: steps.check-image.outputs.exists != 'true'
         uses: actions/setup-python@v6
         with:
           python-version: "3.12"
 
       - name: Download jarfile
-        if: steps.check-image.outputs.exists != 'true'
         run: |
           python updatePaper.py download ./docker/paper.jar "${{ matrix.url }}" "${{ matrix.sha256 }}"
 
       - name: Detect required Java version from jar
         id: detect-java
-        if: steps.check-image.outputs.exists != 'true'
         run: |
           JAVA_VER=$(python updatePaper.py get-jar-version ./docker/paper.jar)
           echo "Detected Java version: $JAVA_VER"
           echo "java_version=$JAVA_VER" >> $GITHUB_OUTPUT
 
       - name: Setup QEMU
-        if: steps.check-image.outputs.exists != 'true'
         uses: docker/setup-qemu-action@v3
 
       - name: Setup buildx
-        if: steps.check-image.outputs.exists != 'true'
         uses: docker/setup-buildx-action@v4
 
       - name: Generate tag list
-        if: steps.check-image.outputs.exists != 'true'
         id: tags
         run: |
           OWNER="${{ steps.prep.outputs.owner }}"
@@ -115,7 +96,6 @@ jobs:
           echo "tags=${TAGS}" >> $GITHUB_OUTPUT
 
       - name: Build and push
-        if: steps.check-image.outputs.exists != 'true'
         uses: docker/build-push-action@v7
         with:
           file: main.dockerfile

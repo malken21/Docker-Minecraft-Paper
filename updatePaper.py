@@ -23,6 +23,33 @@ def parse_version(v_str):
         parts.append(0)
     return parts
 
+def get_existing_tags(owner, package):
+    token_url = f"https://ghcr.io/token?scope=repository:{owner}/{package}:pull"
+    try:
+        req = urllib.request.Request(token_url)
+        with urllib.request.urlopen(req) as resp:
+            token = json.loads(resp.read().decode('utf-8'))['token']
+    except Exception as e:
+        sys.stderr.write(f"Token error for GHCR: {e}\n")
+        return set()
+        
+    url = f"https://ghcr.io/v2/{owner}/{package}/tags/list"
+    req = urllib.request.Request(url)
+    req.add_header("Authorization", f"Bearer {token}")
+    
+    try:
+        with urllib.request.urlopen(req) as resp:
+            data = json.loads(resp.read().decode('utf-8'))
+            return set(data.get('tags', []))
+    except urllib.error.HTTPError as e:
+        if e.code == 404:
+            return set()
+        sys.stderr.write(f"Tags list error: {e}\n")
+        return set()
+    except Exception as e:
+        sys.stderr.write(f"Tags list error: {e}\n")
+        return set()
+
 def get_recent_builds(version, limit=10):
     url = f'https://fill.papermc.io/v3/projects/paper/versions/{version}/builds'
     req = urllib.request.Request(url, headers={'User-Agent': USER_AGENT})
@@ -84,11 +111,20 @@ def get_matrix():
     
     versions.reverse() # 古い順
     
+    existing_tags = set()
+    if 'GITHUB_REPOSITORY' in os.environ:
+        owner = os.environ['GITHUB_REPOSITORY'].split('/')[0].lower()
+        existing_tags = get_existing_tags(owner, "docker-minecraft-paper")
+        sys.stderr.write(f"Found {len(existing_tags)} existing tags on GHCR.\n")
+    
     matrix = []
     for v in versions:
         builds_info = get_recent_builds(v, limit=10)
         builds_info.reverse() # 古いビルドから順に追加
         for build_info in builds_info:
+            if build_info['tag'] in existing_tags:
+                sys.stderr.write(f"Skipping version {v} build {build_info['build']} because it already exists on GHCR.\n")
+                continue
             if verify_url_exists(build_info['url']):
                 matrix.append(build_info)
             else:
