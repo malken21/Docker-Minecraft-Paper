@@ -95,6 +95,41 @@ jobs:
           
           echo "tags=${TAGS}" >> $GITHUB_OUTPUT
 
+      - name: Build local image for testing
+        uses: docker/build-push-action@v7
+        with:
+          file: main.dockerfile
+          context: ./docker
+          load: true
+          tags: test-image:latest
+          build-args: |
+            JAVA_VERSION=${{ steps.detect-java.outputs.java_version }}
+
+      - name: Run container test
+        run: |
+          docker run --name test-server -d test-image:latest
+          sleep 5
+          LOGS=$(docker logs test-server 2>&1)
+          echo "=== Container Logs ==="
+          echo "$LOGS"
+          echo "======================"
+          
+          if echo "$LOGS" | grep -q "Unable to access jarfile"; then
+            echo "Error: Java failed to start due to jarfile access error."
+            docker rm -f test-server
+            exit 1
+          fi
+          
+          if echo "$LOGS" | grep -iq -e "loading" -e "eula" -e "minecraft"; then
+            echo "Success: Java started PaperMC successfully."
+          else
+            echo "Error: PaperMC initialization message not found in logs."
+            docker rm -f test-server
+            exit 1
+          fi
+          
+          docker rm -f test-server
+
       - name: Build and push
         uses: docker/build-push-action@v7
         with:

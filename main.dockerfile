@@ -1,8 +1,8 @@
-ARG JAVA_VERSION
+ARG JAVA_VERSION=21
 FROM gcr.io/distroless/java${JAVA_VERSION}-debian12
 
 COPY paper.jar app.jar
 
 WORKDIR /app
 
-CMD ["-jar", "../app.jar"]
+CMD ["../app.jar"]
